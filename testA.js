@@ -58,14 +58,14 @@ async function captureClassic() {
   const cam = fs.existsSync("/usr/bin/rpicam-still") ? "rpicam-still" : "libcamera-still";
 
   // rpicam-still → ImageMagick (grayscale + tone + sharpen) → PNM → cwebp (size cap)
-  // tip: if scenes are very busy, you can lower 1024→960 to keep a bit more detail under 100KB.
+  // NOTE: stdin to cwebp is the lone '-' argument BEFORE -o
   const cmd = `
     set -o pipefail;
     ${cam} -n -t 400 -o - \
       | convert - -strip -resize '1024x1024>' -colorspace Gray \
           -sigmoidal-contrast 3x50% -contrast-stretch 0.5%x0.5% \
           -unsharp 0x0.75+0.75+0.02 PNM:- \
-      | cwebp -quiet -mt -m 6 -size 100000 -o "${out}" --
+      | cwebp -quiet -mt -m 6 -size 100000 - -o "${out}"
   `;
 
   await sh(cmd);
