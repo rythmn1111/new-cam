@@ -92,19 +92,41 @@ app.get("/latest.json", (_req, res) => {
 });
 
 app.get("/", (_req, res) => {
-  const latest = getLatestImage();
-  const imgTag = latest
-    ? `<img src="/images/${encodeURIComponent(latest)}?ts=${Date.now()}" style="max-width:90%;border:4px solid #eee;margin-top:20px" />`
-    : "<div style='opacity:.7'>No photos yet. Press the button!</div>";
-
+  // No meta refresh. JS polls /latest.json and only swaps the image if it changed.
   res.send(`<!doctype html>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Latest Pi Photo</title>
-  <meta http-equiv="refresh" content="10">
-  <style>body{background:#111;color:#eee;font-family:sans-serif;text-align:center;padding:16px}</style>
+  <style>
+    body{background:#111;color:#eee;font-family:sans-serif;text-align:center;padding:16px}
+    img{max-width:90%;border:4px solid #eee;margin-top:20px}
+    .muted{opacity:.7}
+  </style>
   <h1>Latest BnW Photo</h1>
-  ${imgTag}
-  <p style="opacity:.7;margin-top:12px">${latest || ""}</p>
+  <img id="photo" src="" alt="No photo yet" />
+  <p id="filename" class="muted"></p>
+
+  <script>
+    let last = null;
+    async function refreshOnce(){
+      try{
+        const res = await fetch('/latest.json', { cache: 'no-store' });
+        const data = await res.json();
+        if (data.ok && data.filename) {
+          if (data.filename !== last) {
+            last = data.filename;
+            const img = document.getElementById('photo');
+            img.src = '/images/' + encodeURIComponent(last) + '?ts=' + Date.now();
+            document.getElementById('filename').textContent = last;
+          }
+        } else {
+          document.getElementById('filename').textContent = 'No photos yet!';
+        }
+      }catch(e){ console.error(e); }
+    }
+    // initial load + poll every 2s
+    refreshOnce();
+    setInterval(refreshOnce, 2000);
+  </script>
   `);
 });
 
@@ -115,6 +137,6 @@ app.listen(PORT, () => {
 // ---- Cleanup ----
 process.on("SIGINT", () => {
   try { btn.disableAlert(); } catch {}
-  console.log("\nBye.");
+  console.log("\\nBye.");
   process.exit(0);
 });
