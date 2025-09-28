@@ -1,15 +1,15 @@
-// serverA.js
-// Mode A: Classic BnW look, HARD size cap via cwebp -size 100000
+// serverA.js (FAST)
+// Classic BnW look, HARD size cap via cwebp -size 100000
+// Optimized for speed on Pi Zero 2 W: downsized capture + light processing
 // Run with: sudo -E node serverA.js
 
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
 const { exec } = require("child_process");
 const { Gpio } = require("pigpio");
 
-const MODE = "A (Classic • hard cap)";
+const MODE = "A (Classic • hard cap • FAST)";
 const PORT = 3000;
 const ROOT = __dirname;
 const IMAGES_DIR = path.join(ROOT, "images");
@@ -24,7 +24,7 @@ function nowStamp() {
   return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}_${z(d.getHours())}-${z(d.getMinutes())}-${z(d.getSeconds())}`;
 }
 
-function sh(cmd, timeout = 60000) {
+function sh(cmd, timeout = 30000) {
   return new Promise((resolve, reject) => {
     exec(cmd, { timeout, shell: "/bin/bash" }, (err, stdout, stderr) => {
       if (err) {
@@ -53,28 +53,31 @@ function latest() {
   return files.length ? files[0] : null;
 }
 
-// ---------- capture (classic look, hard ≤100 KB) ----------
+// ---------- capture (FAST: downsized JPEG -> light BnW -> cwebp ≤100KB) ----------
 async function captureClassic() {
-  const cam = fs.existsSync("/usr/bin/rpicam-still") ? "rpicam-still" : "libcamera-still";
-  const tmpPng = path.join(os.tmpdir(), `classic_${process.pid}_${Date.now()}.png`);
   const out = path.join(IMAGES_DIR, `${nowStamp()}.webp`);
+  const cam = fs.existsSync("/usr/bin/rpicam-still") ? "rpicam-still" : "libcamera-still";
 
-  // 1) Capture → grayscale/tone/sharpen → PNG (temp file)
-  // Tip: if you need more headroom for busy scenes, change 1024→960.
-  const toPng = `
+  // SPEED WINS:
+  // - ask the camera for ~1MP directly (1024x768)
+  // - emit JPEG (fast)
+  // - convert: grayscale + mild tonal shaping (cheap at 1MP)
+  // - cwebp size cap to 100KB
+  //
+  // If you want a little more detail (but maybe a hair slower), bump width/height to 1280x960.
+  const WIDTH = 1024;
+  const HEIGHT = 768;
+
+  const cmd = `
     set -o pipefail;
-    ${cam} -n -t 400 -o - \
-      | convert - -strip -resize '1024x1024>' -colorspace Gray \
+    ${cam} -n -t 200 --width ${WIDTH} --height ${HEIGHT} -e jpg -o - \
+      | convert - -strip -colorspace Gray \
           -sigmoidal-contrast 3x50% -contrast-stretch 0.5%x0.5% \
-          -unsharp 0x0.75+0.75+0.02 PNG24:"${tmpPng}"
+          -resize '1024x1024>' JPEG:- \
+      | cwebp -quiet -mt -m 5 -size 100000 - -o "${out}"
   `;
-  await sh(toPng, 70000);
 
-  // 2) PNG → WebP with HARD 100KB cap
-  const toWebP = `cwebp -quiet -mt -m 6 -size 100000 "${tmpPng}" -o "${out}"`;
-  await sh(toWebP, 30000);
-
-  try { fs.unlinkSync(tmpPng); } catch {}
+  await sh(cmd, 45000);
   return out;
 }
 
@@ -91,7 +94,7 @@ btn.on("alert", async (level) => {
   if (isBusy) return;
   isBusy = true;
   try {
-    console.log("Button PRESSED → capturing (Classic)...");
+    console.log("Button PRESSED → capturing (FAST Classic)...");
     const file = await captureClassic();
     const bytes = fs.statSync(file).size;
     console.log(`Saved: ${file}  ${(bytes/1024).toFixed(1)} KB`);
@@ -107,14 +110,12 @@ const app = express();
 app.use(express.static(PUBLIC_DIR));
 app.use("/images", express.static(IMAGES_DIR));
 
-// JSON for the frontend to poll
 app.get("/latest.json", (_req, res) => {
   const f = latest();
   if (!f) return res.json({ ok: false, mode: MODE });
   res.json({ ok: true, filename: f.name, bytes: f.bytes, mode: MODE });
 });
 
-// debug list
 app.get("/debug", (_req,res) => {
   const files = listImages();
   res.type("text/plain").send(
