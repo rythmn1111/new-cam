@@ -5,6 +5,7 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { exec } = require("child_process");
 const { Gpio } = require("pigpio");
 
@@ -54,21 +55,26 @@ function latest() {
 
 // ---------- capture (classic look, hard ≤100 KB) ----------
 async function captureClassic() {
-  const out = path.join(IMAGES_DIR, `${nowStamp()}.webp`);
   const cam = fs.existsSync("/usr/bin/rpicam-still") ? "rpicam-still" : "libcamera-still";
+  const tmpPng = path.join(os.tmpdir(), `classic_${process.pid}_${Date.now()}.png`);
+  const out = path.join(IMAGES_DIR, `${nowStamp()}.webp`);
 
-  // rpicam-still → ImageMagick (grayscale + tone + sharpen) → PNM → cwebp (size cap)
-  // NOTE: stdin to cwebp is the lone '-' argument BEFORE -o
-  const cmd = `
+  // 1) Capture → grayscale/tone/sharpen → PNG (temp file)
+  // Tip: if you need more headroom for busy scenes, change 1024→960.
+  const toPng = `
     set -o pipefail;
     ${cam} -n -t 400 -o - \
       | convert - -strip -resize '1024x1024>' -colorspace Gray \
           -sigmoidal-contrast 3x50% -contrast-stretch 0.5%x0.5% \
-          -unsharp 0x0.75+0.75+0.02 PNM:- \
-      | cwebp -quiet -mt -m 6 -size 100000 - -o "${out}"
+          -unsharp 0x0.75+0.75+0.02 PNG24:"${tmpPng}"
   `;
+  await sh(toPng, 70000);
 
-  await sh(cmd);
+  // 2) PNG → WebP with HARD 100KB cap
+  const toWebP = `cwebp -quiet -mt -m 6 -size 100000 "${tmpPng}" -o "${out}"`;
+  await sh(toWebP, 30000);
+
+  try { fs.unlinkSync(tmpPng); } catch {}
   return out;
 }
 
