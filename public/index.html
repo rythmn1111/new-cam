@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Latest Pi Photo</title>
+  <meta http-equiv="refresh" content="10"> <!-- Auto-refresh every 10s -->
+  <style>
+    body { background: #111; color: #eee; font-family: sans-serif; text-align: center; }
+    img { max-width: 90%; border: 4px solid #eee; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Latest BnW Photo</h1>
+  <img id="photo" src="" alt="No photo yet" />
+  <p id="filename"></p>
+
+  <script>
+    async function loadLatest() {
+      try {
+        const res = await fetch("/latest.json");
+        const data = await res.json();
+        if (data.ok && data.filename) {
+          document.getElementById("photo").src = "/images/" + encodeURIComponent(data.filename) + "?ts=" + Date.now();
+          document.getElementById("filename").textContent = data.filename;
+        } else {
+          document.getElementById("filename").textContent = "No photos yet!";
+        }
+      } catch (e) {
+        console.error("Failed to load latest photo:", e);
+      }
+    }
+    loadLatest();
+    setInterval(loadLatest, 10000); // refresh every 10s
+  </script>
+</body>
+</html>
